@@ -18,7 +18,6 @@
 - **SQL-редактор** — выполнение произвольных запросов, история, шаблоны
 - **Импорт** — CSV/JSON в таблицу
 - **Темы** — тёмная/светлая (переключатель в тулбаре, запоминается)
-- **MCP Image Search** — интеграция с MCP-сервером поиска изображений (Wikimedia + DuckDuckGo)
 
 ## Быстрый старт
 
@@ -65,8 +64,6 @@ NodePgAdmin/
 ├── .gitignore
 ├── store.json         # Локальное хранилище (темы, порядок колонок, шаблоны, история)
 ├── run.bat            # Запуск на Windows
-├── mcp/
-│   └── image-search-server.js  # MCP-сервер поиска изображений
 └── README.md
 ```
 
@@ -102,22 +99,6 @@ NodePgAdmin/
 | `GET/POST/DELETE` | `/api/templates` | SQL-шаблоны |
 | `GET` | `/api/stats` | Статистика БД |
 | `GET/DELETE` | `/api/history` | История запросов |
-
-## MCP Image Search
-
-MCP-сервер `mcp/image-search-server.js` предоставляет инструмент `search_images` для поиска картинок через Wikimedia Commons и DuckDuckGo.
-
-Подключение в `.vscode/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "image-search": {
-      "command": "node",
-      "args": ["C:\\path\\to\\NodePgAdmin\\mcp\\image-search-server.js"]
-    }
-  }
-}
-```
 
 ## Скрипты
 
