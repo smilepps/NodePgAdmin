@@ -992,122 +992,122 @@ app.get('/query', async (req, res) => {
       html += `<div class="error">${esc(err.message)} &middot; ${durationMs} мс</div>`;
     }
   }
-  html += `<script>
-// Autocomplete
-let acData = { tables: [], columns: {}, keywords: [] };
-let acIndex = -1;
-let acVisible = false;
-const acBox = document.createElement('div');
-acBox.id = 'autocompleteBox';
-acBox.style.cssText = 'position:absolute;background:var(--card);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:1000;max-height:300px;overflow:auto;min-width:250px;display:none;font-size:0.8rem;';
-document.body.appendChild(acBox);
-
-async function loadAutocomplete() {
-  try {
-    const r = await fetch('/api/autocomplete');
-    const d = await r.json();
-    acData = d;
-  } catch (e) { console.warn('Autocomplete load failed:', e); }
-}
-loadAutocomplete();
-
-function getWordBeforeCursor(text, pos) {
-  const before = text.substring(0, pos);
-  const match = before.match(/([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z0-9_]*)$/);
-  return match ? match[1] : '';
-}
-
-function showAutocomplete(input, prefix) {
-  const rect = input.getBoundingClientRect();
-  acBox.style.top = (rect.bottom + window.scrollY) + 'px';
-  acBox.style.left = (rect.left + window.scrollX) + 'px';
-  
-  const suggestions = [];
-  const lowerPrefix = prefix.toLowerCase();
-  
-  // Keywords
-  for (const kw of acData.keywords) {
-    if (kw.toLowerCase().startsWith(lowerPrefix)) suggestions.push({ label: kw, type: 'keyword' });
-  }
-  // Tables
-  for (const t of acData.tables) {
-    if (t.toLowerCase().startsWith(lowerPrefix)) suggestions.push({ label: t, type: 'table' });
-  }
-  // Columns (if prefix contains a dot, e.g., "table.")
-  const dotIdx = prefix.lastIndexOf('.');
-  if (dotIdx >= 0) {
-    const tablePart = prefix.substring(0, dotIdx);
-    const colPrefix = prefix.substring(dotIdx + 1).toLowerCase();
-    for (const [tbl, cols] of Object.entries(acData.columns)) {
-      if (tbl.toLowerCase() === tablePart.toLowerCase()) {
-        for (const c of cols) {
-          if (c.name.toLowerCase().startsWith(colPrefix)) suggestions.push({ label: tbl + '.' + c.name, type: 'column', colType: c.type });
-        }
-      }
-    }
-  } else {
-    // Show columns for all tables
-    for (const [tbl, cols] of Object.entries(acData.columns)) {
-      for (const c of cols) {
-        if (c.name.toLowerCase().startsWith(lowerPrefix)) suggestions.push({ label: tbl + '.' + c.name, type: 'column', colType: c.type });
-      }
-    }
-  }
-  
-  if (suggestions.length === 0) { hideAutocomplete(); return; }
-  
-  acBox.innerHTML = suggestions.slice(0, 50).map((s, i) => 
-    '<div class="ac-item" data-index="' + i + '" style="padding:0.3rem 0.6rem;cursor:pointer;' + (i === 0 ? 'background:var(--accent);color:#fff;' : '') + '"><span style="color:var(--muted);font-size:0.7rem;margin-right:0.5rem;">' + s.type + '</span>' + esc(s.label) + (s.colType ? ' <span style="color:var(--muted);font-size:0.7rem;">(' + s.colType + ')</span>' : '') + '</div>'
-  ).join('');
-  
-  acBox.style.display = 'block';
-  acVisible = true;
-  acIndex = 0;
-}
-
-function hideAutocomplete() { acBox.style.display = 'none'; acVisible = false; acIndex = -1; }
-
-function esc(s) { return String(s).replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>').replace(/"/g,'"').replace(/'/g,'&#039;'); }
-
-const editor = document.getElementById('sqlEditor');
-editor.addEventListener('input', function() {
-  const pos = this.selectionStart;
-  const word = getWordBeforeCursor(this.value, pos);
-  if (word.length >= 1) showAutocomplete(this, word);
-  else hideAutocomplete();
-});
-
-editor.addEventListener('keydown', function(e) {
-  if (!acVisible) return;
-  const items = acBox.querySelectorAll('.ac-item');
-  if (e.key === 'ArrowDown') { e.preventDefault(); acIndex = Math.min(acIndex + 1, items.length - 1); updateSelection(items); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); acIndex = Math.max(acIndex - 1, 0); updateSelection(items); }
-  else if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); if (acIndex >= 0 && items[acIndex]) insertCompletion(items[acIndex].textContent.trim()); }
-  else if (e.key === 'Escape') { hideAutocomplete(); }
-});
-
-function updateSelection(items) {
-  items.forEach((el, i) => { el.style.background = i === acIndex ? 'var(--accent)' : ''; el.style.color = i === acIndex ? '#fff' : ''; });
-}
-
-function insertCompletion(text) {
-  const pos = editor.selectionStart;
-  const word = getWordBeforeCursor(editor.value, pos);
-  const start = pos - word.length;
-  editor.value = editor.value.substring(0, start) + text + editor.value.substring(pos);
-  editor.selectionStart = editor.selectionEnd = start + text.length;
-  hideAutocomplete();
-  editor.focus();
-}
-
-document.addEventListener('click', e => { if (!acBox.contains(e.target) && e.target !== editor) hideAutocomplete(); });
-
-function applyTpl(){const s=document.getElementById('tplSelect');if(!s.value)return;fetch('/api/templates').then(r=>r.json()).then(ts=>{const t=ts.find(x=>x.name===s.value);if(t){document.querySelector('textarea[name=q]').value=t.sql;document.querySelector('form').requestSubmit?document.querySelector('form').requestSubmit():null;}});}
-function saveTpl(){const name=prompt('Имя шаблона:');if(!name)return;const sql=document.querySelector('textarea[name=q]').value;fetch('/api/templates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,sql})}).then(r=>r.ok?location.reload():alert('Ошибка')).catch(e=>alert(e.message));}
-function clearTpls(){if(confirm('Удалить все шаблоны?')){fetch('/api/templates',{method:'DELETE'}).then(r=>r.ok?location.reload():alert('Ошибка')).catch(e=>alert(e.message));}}
-function clearSql(){document.querySelector('textarea[name=q]').value='';}
-function fillSql(sql){document.querySelector('textarea[name=q]').value=decodeURIComponent(sql.replace(/'/g,"'"));}
-</script>`);
+html += '<script>';
+  html += '// Autocomplete';
+  html += 'let acData = { tables: [], columns: {}, keywords: [] };';
+  html += 'let acIndex = -1;';
+  html += 'let acVisible = false;';
+  html += 'const acBox = document.createElement("div");';
+  html += 'acBox.id = "autocompleteBox";';
+  html += 'acBox.style.cssText = "position:absolute;background:var(--card);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:1000;max-height:300px;overflow:auto;min-width:250px;display:none;font-size:0.8rem;";';
+  html += 'document.body.appendChild(acBox);';
+  html += '';
+  html += 'async function loadAutocomplete() {';
+  html += '  try {';
+  html += '    const r = await fetch("/api/autocomplete");';
+  html += '    const d = await r.json();';
+  html += '    acData = d;';
+  html += '  } catch (e) { console.warn("Autocomplete load failed:", e); }';
+  html += '}';
+  html += 'loadAutocomplete();';
+  html += '';
+  html += 'function getWordBeforeCursor(text, pos) {';
+  html += '  const before = text.substring(0, pos);';
+  html += '  const match = before.match(/([a-zA-Z_][a-zA-Z0-9_]*\\.?[a-zA-Z0-9_]*)$/);';
+  html += '  return match ? match[1] : "";';
+  html += '}';
+  html += '';
+  html += 'function showAutocomplete(input, prefix) {';
+  html += '  const rect = input.getBoundingClientRect();';
+  html += '  acBox.style.top = (rect.bottom + window.scrollY) + "px";';
+  html += '  acBox.style.left = (rect.left + window.scrollX) + "px";';
+  html += '  ';
+  html += '  const suggestions = [];';
+  html += '  const lowerPrefix = prefix.toLowerCase();';
+  html += '  ';
+  html += '  // Keywords';
+  html += '  for (const kw of acData.keywords) {';
+  html += '    if (kw.toLowerCase().startsWith(lowerPrefix)) suggestions.push({ label: kw, type: "keyword" });';
+  html += '  }';
+  html += '  // Tables';
+  html += '  for (const t of acData.tables) {';
+  html += '    if (t.toLowerCase().startsWith(lowerPrefix)) suggestions.push({ label: t, type: "table" });';
+  html += '  }';
+  html += '  // Columns (if prefix contains a dot, e.g., "table.")';
+  html += '  const dotIdx = prefix.lastIndexOf(".");';
+  html += '  if (dotIdx >= 0) {';
+  html += '    const tablePart = prefix.substring(0, dotIdx);';
+  html += '    const colPrefix = prefix.substring(dotIdx + 1).toLowerCase();';
+  html += '    for (const [tbl, cols] of Object.entries(acData.columns)) {';
+  html += '      if (tbl.toLowerCase() === tablePart.toLowerCase()) {';
+  html += '        for (const c of cols) {';
+  html += '          if (c.name.toLowerCase().startsWith(colPrefix)) suggestions.push({ label: tbl + "." + c.name, type: "column", colType: c.type });';
+  html += '        }';
+  html += '      }';
+  html += '    }';
+  html += '  } else {';
+  html += '    // Show columns for all tables';
+  html += '    for (const [tbl, cols] of Object.entries(acData.columns)) {';
+  html += '      for (const c of cols) {';
+  html += '        if (c.name.toLowerCase().startsWith(lowerPrefix)) suggestions.push({ label: tbl + "." + c.name, type: "column", colType: c.type });';
+  html += '      }';
+  html += '    }';
+  html += '  }';
+  html += '  ';
+  html += '  if (suggestions.length === 0) { hideAutocomplete(); return; }';
+  html += '  ';
+  html += '  acBox.innerHTML = suggestions.slice(0, 50).map((s, i) => ';
+  html += '    \'<div class="ac-item" data-index="\' + i + \'" style="padding:0.3rem 0.6rem;cursor:pointer;\' + (i === 0 ? \'background:var(--accent);color:#fff;\' : \'\') + \'"><span style="color:var(--muted);font-size:0.7rem;margin-right:0.5rem;">\' + s.type + \'</span>\' + esc(s.label) + (s.colType ? \' <span style="color:var(--muted);font-size:0.7rem;">(\' + s.colType + \')</span>\' : \'\') + \'</div>\'';
+  html += '  ).join(\'\');';
+  html += '  ';
+  html += '  acBox.style.display = "block";';
+  html += '  acVisible = true;';
+  html += '  acIndex = 0;';
+  html += '}';
+  html += '';
+  html += 'function hideAutocomplete() { acBox.style.display = "none"; acVisible = false; acIndex = -1; }';
+  html += '';
+  html += 'function esc(s) { return String(s).replace(/&/g,"&").replace(/</g,"<").replace(/>/g,">").replace(/"/g,""").replace(/\x27/g,"&#039;"); }';
+  html += '';
+  html += 'const editor = document.getElementById("sqlEditor");';
+  html += 'editor.addEventListener("input", function() {';
+  html += '  const pos = this.selectionStart;';
+  html += '  const word = getWordBeforeCursor(this.value, pos);';
+  html += '  if (word.length >= 1) showAutocomplete(this, word);';
+  html += '  else hideAutocomplete();';
+  html += '});';
+  html += '';
+  html += 'editor.addEventListener("keydown", function(e) {';
+  html += '  if (!acVisible) return;';
+  html += '  const items = acBox.querySelectorAll(".ac-item");';
+  html += '  if (e.key === "ArrowDown") { e.preventDefault(); acIndex = Math.min(acIndex + 1, items.length - 1); updateSelection(items); }';
+  html += '  else if (e.key === "ArrowUp") { e.preventDefault(); acIndex = Math.max(acIndex - 1, 0); updateSelection(items); }';
+  html += '  else if (e.key === "Tab" || e.key === "Enter") { e.preventDefault(); if (acIndex >= 0 && items[acIndex]) insertCompletion(items[acIndex].textContent.trim()); }';
+  html += '  else if (e.key === "Escape") { hideAutocomplete(); }';
+  html += '});';
+  html += '';
+  html += 'function updateSelection(items) {';
+  html += '  items.forEach((el, i) => { el.style.background = i === acIndex ? "var(--accent)" : ""; el.style.color = i === acIndex ? "#fff" : ""; });';
+  html += '}';
+  html += '';
+  html += 'function insertCompletion(text) {';
+  html += '  const pos = editor.selectionStart;';
+  html += '  const word = getWordBeforeCursor(editor.value, pos);';
+  html += '  const start = pos - word.length;';
+  html += '  editor.value = editor.value.substring(0, start) + text + editor.value.substring(pos);';
+  html += '  editor.selectionStart = editor.selectionEnd = start + text.length;';
+  html += '  hideAutocomplete();';
+  html += '  editor.focus();';
+  html += '}';
+  html += '';
+  html += 'document.addEventListener("click", e => { if (!acBox.contains(e.target) && e.target !== editor) hideAutocomplete(); });';
+  html += '';
+  html += 'function applyTpl(){const s=document.getElementById("tplSelect");if(!s.value)return;fetch("/api/templates").then(r=>r.json()).then(ts=>{const t=ts.find(x=>x.name===s.value);if(t){document.querySelector("textarea[name=q]").value=t.sql;document.querySelector("form").requestSubmit?document.querySelector("form").requestSubmit():null;}});}';
+  html += 'function saveTpl(){const name=prompt("Имя шаблона:");if(!name)return;const sql=document.querySelector("textarea[name=q]").value;fetch("/api/templates",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,sql})}).then(r=>r.ok?location.reload():alert("Ошибка")).catch(e=>alert(e.message));}';
+  html += 'function clearTpls(){if(confirm("Удалить все шаблоны?")){fetch("/api/templates",{method:"DELETE"}).then(r=>r.ok?location.reload():alert("Ошибка")).catch(e=>alert(e.message));}}';
+  html += 'function clearSql(){document.querySelector("textarea[name=q]").value="";}';
+  html += 'function fillSql(sql){document.querySelector("textarea[name=q]").value=decodeURIComponent(sql.replace(/\x27/g,"\\x27"));}';
+  html += '</script>';
   res.send(shell('SQL-редактор', html));
 });
 
