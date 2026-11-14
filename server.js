@@ -338,7 +338,7 @@ app.get('/browser', async (req, res) => {
       for (const v of views.rows) html += `<li><a href="/view/${encodeURIComponent(v.name)}">${esc(v.name)}</a></li>`;
       html += `</ul>`;
     }
-    html += `</div>`;
+    html += `<a href="/create-view" class="btn primary small">➕ Создать представление</a></div>`;
     res.send(shell('Браузер объектов', html));
   } catch (err) {
     res.status(500).send(shell('Ошибка', `<div class="error">${esc(err.message)}</div>`));
@@ -762,6 +762,26 @@ app.post('/create-table', async (req, res) => {
   }
 });
 
+// ---------- Create view ----------
+app.get('/create-view', (req, res) => {
+  let html = `<h1><emoji>👁️</emoji> Новое представление</h1><form method="post" action="/create-view" class="card">
+    <div class="form-group"><label>Имя представления</label><input type="text" name="view_name" required></div>
+    <div class="form-group"><label>SQL запрос (SELECT ...)</label><textarea name="definition" class="sql" rows="15" placeholder="SELECT * FROM table WHERE ..."></textarea></div>
+    <button type="submit" class="btn primary small">Создать представление</button> <a href="/browser" class="btn ghost small">Назад</a></form>`;
+  res.send(shell('Новое представление', html));
+});
+
+app.post('/create-view', async (req, res) => {
+  const { view_name, definition } = req.body;
+  if (!view_name || !definition || !definition.trim()) return res.send(shell('Ошибка', `<div class="error">Укажите имя и SQL запрос</div>`));
+  try {
+    await pool.query(`CREATE VIEW ${ident(view_name)} AS ${definition.trim()}`);
+    res.redirect(`/view/${encodeURIComponent(view_name)}`);
+  } catch (err) {
+    res.status(500).send(shell('Ошибка', `<div class="error">${esc(err.message)}</div>`));
+  }
+});
+
 // ---------- Drop table ----------
 app.post('/table/:table/drop', async (req, res) => {
   const table = req.params.table;
@@ -867,7 +887,8 @@ app.get('/view/:view', async (req, res) => {
     const rows = await pool.query(`SELECT * FROM ${ident(view)} LIMIT $1 OFFSET $2`, [limit, offset]);
     const total = parseInt(cnt[0].c, 10);
     let html = `<h1><emoji>👁️</emoji> Представление <code>${esc(view)}</code></h1>`;
-    html += `<a href="/browser" class="btn ghost small">↩ Браузер</a>`;
+    html += `<a href="/browser" class="btn ghost small">↩ Браузер</a>
+<a href="/view/${encodeURIComponent(view)}/edit" class="btn primary small">✏️ Редактировать</a>`;
     html += `<h3>Определение</h3><pre class="sql mono">${esc(def.rows[0].ddl)}</pre>`;
     html += `<p><span class="badge">${total}</span> строк <span class="badge">стр. ${page}/${Math.ceil(total / limit) || 1}</span></p>`;
     if (rows.rows.length) {
@@ -899,6 +920,35 @@ app.post('/view/:view/drop', async (req, res) => {
   }
 });
 
+// ---------- View: edit definition ----------
+app.get('/view/:view/edit', async (req, res) => {
+  const view = req.params.view;
+  try {
+    const def = await pool.query(`SELECT pg_get_viewdef($1::regclass, true) AS ddl`, [view]);
+    let html = `<h1><emoji>✏️</emoji> Редактирование представления <code>${esc(view)}</code></h1>`;
+    html += `<a href="/view/${encodeURIComponent(view)}" class="btn ghost small">↩ К представлению</a>`;
+    html += `<form method="post" action="/view/${encodeURIComponent(view)}/edit" class="card">`;
+    html += `<div class="form-group"><label>SQL определение</label><textarea name="definition" class="sql" rows="20" required>${esc(def.rows[0].ddl)}</textarea></div>`;
+    html += `<button type="submit" class="btn primary small">Сохранить</button> <a href="/view/${encodeURIComponent(view)}" class="btn ghost small">Отмена</a></form>`;
+    res.send(shell(`Редактирование ${view}`, html));
+  } catch (err) {
+    res.status(500).send(shell('Ошибка', `<div class="error">${esc(err.message)}</div>`));
+  }
+});
+
+app.post('/view/:view/edit', async (req, res) => {
+  const view = req.params.view;
+  const { definition } = req.body;
+  if (!definition || !definition.trim()) return res.send(shell('Ошибка', `<div class="error">Определение не может быть пустым</div>`));
+  try {
+    await pool.query(`DROP VIEW ${ident(view)}`);
+    await pool.query(`CREATE VIEW ${ident(view)} AS ${definition.trim()}`);
+    res.redirect(`/view/${encodeURIComponent(view)}`);
+  } catch (err) {
+    res.status(500).send(shell('Ошибка', `<div class="error">${esc(err.message)}</div>`));
+  }
+});
+
 // ---------- SQL editor ----------
 app.get('/query', async (req, res) => {
   const q = req.query.q || '';
@@ -907,7 +957,7 @@ app.get('/query', async (req, res) => {
   html += `<div class="templates"><label>Шаблон: <select id="tplSelect" onchange="applyTpl()"><option value="">— выберите шаблон —</option>`;
   for (const t of templates) html += `<option value="${esc(t.name)}">${esc(t.name)}</option>`;
   html += `</select> <button class="btn small" onclick="saveTpl()">💾 Сохранить текущий как шаблон</button> <button class="btn reset small" onclick="clearTpls()">🗑️ Очистить шаблоны</button></label></div>`;
-  html += `<form method="get" action="/query" class="card"><textarea name="q" class="sql" placeholder="SELECT * FROM candles LIMIT 50;">${esc(q)}</textarea><br><button type="submit" class="btn primary small">▶ Выполнить (Ctrl+Enter)</button> <a href="/" class="btn ghost small">Дашборд</a> <button class="btn reset small" type="button" onclick="clearSql()">🔄 Сброс</button></form>`;
+  html += `<form method="get" action="/query" class="card"><textarea name="q" class="sql" id="sqlEditor" placeholder="SELECT * FROM candles LIMIT 50;">${esc(q)}</textarea><br><button type="submit" class="btn primary small">▶ Выполнить (Ctrl+Enter)</button> <a href="/" class="btn ghost small">Дашборд</a> <button class="btn reset small" type="button" onclick="clearSql()">🔄 Сброс</button></form>`;
   if (q) {
     const start = Date.now();
     try {
@@ -943,12 +993,121 @@ app.get('/query', async (req, res) => {
     }
   }
   html += `<script>
+// Autocomplete
+let acData = { tables: [], columns: {}, keywords: [] };
+let acIndex = -1;
+let acVisible = false;
+const acBox = document.createElement('div');
+acBox.id = 'autocompleteBox';
+acBox.style.cssText = 'position:absolute;background:var(--card);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:1000;max-height:300px;overflow:auto;min-width:250px;display:none;font-size:0.8rem;';
+document.body.appendChild(acBox);
+
+async function loadAutocomplete() {
+  try {
+    const r = await fetch('/api/autocomplete');
+    const d = await r.json();
+    acData = d;
+  } catch (e) { console.warn('Autocomplete load failed:', e); }
+}
+loadAutocomplete();
+
+function getWordBeforeCursor(text, pos) {
+  const before = text.substring(0, pos);
+  const match = before.match(/([a-zA-Z_][a-zA-Z0-9_]*\.?[a-zA-Z0-9_]*)$/);
+  return match ? match[1] : '';
+}
+
+function showAutocomplete(input, prefix) {
+  const rect = input.getBoundingClientRect();
+  acBox.style.top = (rect.bottom + window.scrollY) + 'px';
+  acBox.style.left = (rect.left + window.scrollX) + 'px';
+  
+  const suggestions = [];
+  const lowerPrefix = prefix.toLowerCase();
+  
+  // Keywords
+  for (const kw of acData.keywords) {
+    if (kw.toLowerCase().startsWith(lowerPrefix)) suggestions.push({ label: kw, type: 'keyword' });
+  }
+  // Tables
+  for (const t of acData.tables) {
+    if (t.toLowerCase().startsWith(lowerPrefix)) suggestions.push({ label: t, type: 'table' });
+  }
+  // Columns (if prefix contains a dot, e.g., "table.")
+  const dotIdx = prefix.lastIndexOf('.');
+  if (dotIdx >= 0) {
+    const tablePart = prefix.substring(0, dotIdx);
+    const colPrefix = prefix.substring(dotIdx + 1).toLowerCase();
+    for (const [tbl, cols] of Object.entries(acData.columns)) {
+      if (tbl.toLowerCase() === tablePart.toLowerCase()) {
+        for (const c of cols) {
+          if (c.name.toLowerCase().startsWith(colPrefix)) suggestions.push({ label: tbl + '.' + c.name, type: 'column', colType: c.type });
+        }
+      }
+    }
+  } else {
+    // Show columns for all tables
+    for (const [tbl, cols] of Object.entries(acData.columns)) {
+      for (const c of cols) {
+        if (c.name.toLowerCase().startsWith(lowerPrefix)) suggestions.push({ label: tbl + '.' + c.name, type: 'column', colType: c.type });
+      }
+    }
+  }
+  
+  if (suggestions.length === 0) { hideAutocomplete(); return; }
+  
+  acBox.innerHTML = suggestions.slice(0, 50).map((s, i) => 
+    '<div class="ac-item" data-index="' + i + '" style="padding:0.3rem 0.6rem;cursor:pointer;' + (i === 0 ? 'background:var(--accent);color:#fff;' : '') + '"><span style="color:var(--muted);font-size:0.7rem;margin-right:0.5rem;">' + s.type + '</span>' + esc(s.label) + (s.colType ? ' <span style="color:var(--muted);font-size:0.7rem;">(' + s.colType + ')</span>' : '') + '</div>'
+  ).join('');
+  
+  acBox.style.display = 'block';
+  acVisible = true;
+  acIndex = 0;
+}
+
+function hideAutocomplete() { acBox.style.display = 'none'; acVisible = false; acIndex = -1; }
+
+function esc(s) { return String(s).replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>').replace(/"/g,'"').replace(/'/g,'&#039;'); }
+
+const editor = document.getElementById('sqlEditor');
+editor.addEventListener('input', function() {
+  const pos = this.selectionStart;
+  const word = getWordBeforeCursor(this.value, pos);
+  if (word.length >= 1) showAutocomplete(this, word);
+  else hideAutocomplete();
+});
+
+editor.addEventListener('keydown', function(e) {
+  if (!acVisible) return;
+  const items = acBox.querySelectorAll('.ac-item');
+  if (e.key === 'ArrowDown') { e.preventDefault(); acIndex = Math.min(acIndex + 1, items.length - 1); updateSelection(items); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); acIndex = Math.max(acIndex - 1, 0); updateSelection(items); }
+  else if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); if (acIndex >= 0 && items[acIndex]) insertCompletion(items[acIndex].textContent.trim()); }
+  else if (e.key === 'Escape') { hideAutocomplete(); }
+});
+
+function updateSelection(items) {
+  items.forEach((el, i) => { el.style.background = i === acIndex ? 'var(--accent)' : ''; el.style.color = i === acIndex ? '#fff' : ''; });
+}
+
+function insertCompletion(text) {
+  const pos = editor.selectionStart;
+  const word = getWordBeforeCursor(editor.value, pos);
+  const start = pos - word.length;
+  editor.value = editor.value.substring(0, start) + text + editor.value.substring(pos);
+  editor.selectionStart = editor.selectionEnd = start + text.length;
+  hideAutocomplete();
+  editor.focus();
+}
+
+document.addEventListener('click', e => { if (!acBox.contains(e.target) && e.target !== editor) hideAutocomplete(); });
+
 function applyTpl(){const s=document.getElementById('tplSelect');if(!s.value)return;fetch('/api/templates').then(r=>r.json()).then(ts=>{const t=ts.find(x=>x.name===s.value);if(t){document.querySelector('textarea[name=q]').value=t.sql;document.querySelector('form').requestSubmit?document.querySelector('form').requestSubmit():null;}});}
 function saveTpl(){const name=prompt('Имя шаблона:');if(!name)return;const sql=document.querySelector('textarea[name=q]').value;fetch('/api/templates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,sql})}).then(r=>r.ok?location.reload():alert('Ошибка')).catch(e=>alert(e.message));}
 function clearTpls(){if(confirm('Удалить все шаблоны?')){fetch('/api/templates',{method:'DELETE'}).then(r=>r.ok?location.reload():alert('Ошибка')).catch(e=>alert(e.message));}}
 function clearSql(){document.querySelector('textarea[name=q]').value='';}
-function fillSql(sql){document.querySelector('textarea[name=q]').value=decodeURIComponent(sql.replace(/&#39;/g,"'"));}
-</script>`;
+function fillSql(sql){document.querySelector('textarea[name=q]').value=decodeURIComponent(sql.replace(/'/g,"'"));}
+</script>`);
   res.send(shell('SQL-редактор', html));
 });
 
@@ -1094,6 +1253,35 @@ app.post('/api/column-order/:table', async (req, res) => {
   store.columnOrder[table] = order;
   saveStore();
   res.json({ ok: true });
+});
+
+// SQL autocomplete API
+app.get('/api/autocomplete', async (req, res) => {
+  try {
+    const tables = await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name`);
+    const views = await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='VIEW' ORDER BY table_name`);
+    const allTables = [...tables.rows.map(r => r.table_name), ...views.rows.map(r => r.table_name)];
+    
+    // Get columns for each table
+    const columns = {};
+    for (const t of allTables) {
+      const cols = await pool.query(`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 ORDER BY ordinal_position`, [t]);
+      columns[t] = cols.rows.map(c => ({ name: c.column_name, type: c.data_type }));
+    }
+    
+    const keywords = [
+      'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'OUTER JOIN',
+      'ON', 'GROUP BY', 'ORDER BY', 'LIMIT', 'OFFSET', 'INSERT', 'INTO', 'VALUES',
+      'UPDATE', 'SET', 'DELETE', 'CREATE', 'TABLE', 'INDEX', 'VIEW', 'ALTER', 'DROP',
+      'AND', 'OR', 'NOT', 'IN', 'LIKE', 'ILIKE', 'IS', 'NULL', 'BETWEEN', 'EXISTS',
+      'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'DISTINCT', 'AS', 'ASC', 'DESC',
+      'NOW', 'CURRENT_DATE', 'CURRENT_TIMESTAMP'
+    ];
+    
+    res.json({ tables: allTables, columns, keywords });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- Static ----------
